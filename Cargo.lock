@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "string_combinators"
+name = "monch"
 version = "0.1.0"

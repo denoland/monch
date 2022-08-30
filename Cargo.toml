@@ -1,10 +1,10 @@
 [package]
-name = "string_combinators"
+name = "monch"
 version = "0.1.0"
 authors = ["the Deno authors"]
-documentation = "https://docs.rs/string_combinators"
+documentation = "https://docs.rs/monch"
 edition = "2021"
 homepage = "https://deno.land/"
 license = "MIT"
-repository = "https://github.com/denoland/string_combinators"
+repository = "https://github.com/denoland/monch"
 description = "Inspired by nom, but specifically for strings and with custom error messages."
