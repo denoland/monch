@@ -1,0 +1,10 @@
+[package]
+name = "string_combinators"
+version = "0.0.1"
+authors = ["the Deno authors"]
+documentation = "https://docs.rs/string_combinators"
+edition = "2021"
+homepage = "https://deno.land/"
+license = "MIT"
+repository = "https://github.com/denoland/string_combinators"
+description = "Inspired by nom, but specifically for strings and with error messages."
