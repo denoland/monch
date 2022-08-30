@@ -1,6 +1,6 @@
 [package]
 name = "string_combinators"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["the Deno authors"]
 documentation = "https://docs.rs/string_combinators"
 edition = "2021"
