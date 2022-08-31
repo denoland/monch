@@ -81,18 +81,38 @@ pub fn tag<'a>(
   }
 }
 
-/// Takes while the condition is true.
-pub fn take_while(
+/// Gets the substring found for the duration of the combinator.
+pub fn substring<'a, O>(
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+) -> impl Fn(&'a str) -> ParseResult<&'a str> {
+  move |input| {
+    let original_input = input;
+    let (input, _) = combinator(input)?;
+    let length = original_input.len() - input.len();
+    Ok((input, &original_input[..length]))
+  }
+}
+
+/// Skip the input while the condition is true.
+pub fn skip_while<'a>(
   cond: impl Fn(char) -> bool,
-) -> impl Fn(&str) -> ParseResult<&str> {
+) -> impl Fn(&'a str) -> ParseResult<'a, ()> {
   move |input| {
     for (pos, c) in input.char_indices() {
       if !cond(c) {
-        return Ok((&input[pos..], &input[..pos]));
+        return Ok((&input[pos..], ()));
       }
     }
-    Ok(("", input))
+    // reached the end
+    Ok(("", ()))
   }
+}
+
+/// Takes a substring while the condition is true.
+pub fn take_while<'a>(
+  cond: impl Fn(char) -> bool,
+) -> impl Fn(&'a str) -> ParseResult<&'a str> {
+  substring(skip_while(cond))
 }
 
 /// Maps a success to `Some(T)` and a backtrace to `None`.
@@ -106,7 +126,7 @@ pub fn maybe<'a, O>(
   }
 }
 
-/// Maps the combinator by a function.
+/// Maps the success of a combinator by a function.
 pub fn map<'a, O, R>(
   combinator: impl Fn(&'a str) -> ParseResult<O>,
   func: impl Fn(O) -> R,
@@ -115,6 +135,14 @@ pub fn map<'a, O, R>(
     let (input, result) = combinator(input)?;
     Ok((input, func(result)))
   }
+}
+
+/// Maps the result of a combinator by a function.
+pub fn map_res<'a, O, R>(
+  combinator: impl Fn(&'a str) -> ParseResult<O>,
+  func: impl Fn(ParseResult<O>) -> R,
+) -> impl Fn(&'a str) -> R {
+  move |input| func(combinator(input))
 }
 
 /// Checks for either to match.
@@ -189,11 +217,7 @@ pub fn preceded<'a, First, Second>(
   first: impl Fn(&'a str) -> ParseResult<'a, First>,
   second: impl Fn(&'a str) -> ParseResult<'a, Second>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Second> {
-  move |input| {
-    let (input, _) = first(input)?;
-    let (input, return_value) = second(input)?;
-    Ok((input, return_value))
-  }
+  map(pair(first, second), |(_, second)| second)
 }
 
 /// Returns the first value and discards the second.
@@ -201,11 +225,7 @@ pub fn terminated<'a, First, Second>(
   first: impl Fn(&'a str) -> ParseResult<'a, First>,
   second: impl Fn(&'a str) -> ParseResult<'a, Second>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, First> {
-  move |input| {
-    let (input, return_value) = first(input)?;
-    let (input, _) = second(input)?;
-    Ok((input, return_value))
-  }
+  map(pair(first, second), |(first, _)| first)
 }
 
 /// Gets a second value that is delimited by a first and third.
@@ -219,6 +239,18 @@ pub fn delimited<'a, First, Second, Third>(
     let (input, return_value) = second(input)?;
     let (input, _) = third(input)?;
     Ok((input, return_value))
+  }
+}
+
+/// Returns both results of the two combinators.
+pub fn pair<'a, First, Second>(
+  first: impl Fn(&'a str) -> ParseResult<'a, First>,
+  second: impl Fn(&'a str) -> ParseResult<'a, Second>,
+) -> impl Fn(&'a str) -> ParseResult<'a, (First, Second)> {
+  move |input| {
+    let (input, first_value) = first(input)?;
+    let (input, second_value) = second(input)?;
+    Ok((input, (first_value, second_value)))
   }
 }
 
@@ -356,14 +388,7 @@ pub fn many0<'a, O>(
 pub fn many1<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
-  move |input| {
-    let mut results = Vec::new();
-    let (input, first_result) = combinator(input)?;
-    results.push(first_result);
-    let (input, next_results) = many0(&combinator)(input)?;
-    results.extend(next_results);
-    Ok((input, results))
-  }
+  if_not_empty(many0(combinator))
 }
 
 /// Skips the whitespace.
@@ -407,6 +432,35 @@ pub fn if_true<'a, O>(
       ParseError::backtrace()
     }
   }
+}
+
+pub trait IsEmptyable {
+  fn is_empty(&self) -> bool;
+}
+
+impl IsEmptyable for String {
+  fn is_empty(&self) -> bool {
+    self.is_empty()
+  }
+}
+
+impl<'a> IsEmptyable for &'a str {
+  fn is_empty(&self) -> bool {
+    (*self).is_empty()
+  }
+}
+
+impl<T> IsEmptyable for Vec<T> {
+  fn is_empty(&self) -> bool {
+    self.is_empty()
+  }
+}
+
+/// Checks if the combinator result is not empty.
+pub fn if_not_empty<'a, R: IsEmptyable>(
+  combinator: impl Fn(&'a str) -> ParseResult<'a, R>,
+) -> impl Fn(&'a str) -> ParseResult<'a, R> {
+  if_true(combinator, |items| !items.is_empty())
 }
 
 /// Checks if a combinator is false without consuming the input.
