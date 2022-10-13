@@ -46,6 +46,7 @@ pub fn ch<'a>(c: char) -> impl Fn(&'a str) -> ParseResult<'a, char> {
 }
 
 /// Gets the next character.
+#[allow(clippy::needless_lifetimes)]
 pub fn next_char<'a>(input: &'a str) -> ParseResult<'a, char> {
   match input.chars().next() {
     Some(next_char) => Ok((&input[next_char.len_utf8()..], next_char)),
