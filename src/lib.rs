@@ -46,7 +46,8 @@ pub fn ch<'a>(c: char) -> impl Fn(&'a str) -> ParseResult<'a, char> {
 }
 
 /// Gets the next character.
-pub fn next_char(input: &str) -> ParseResult<char> {
+#[allow(clippy::needless_lifetimes)]
+pub fn next_char<'a>(input: &'a str) -> ParseResult<'a, char> {
   match input.chars().next() {
     Some(next_char) => Ok((&input[next_char.len_utf8()..], next_char)),
     _ => ParseError::backtrace(),
@@ -84,7 +85,7 @@ pub fn tag<'a>(
 /// Gets the substring found for the duration of the combinator.
 pub fn substring<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
-) -> impl Fn(&'a str) -> ParseResult<&'a str> {
+) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
   move |input| {
     let original_input = input;
     let (input, _) = combinator(input)?;
@@ -111,14 +112,14 @@ pub fn skip_while<'a>(
 /// Takes a substring while the condition is true.
 pub fn take_while<'a>(
   cond: impl Fn(char) -> bool,
-) -> impl Fn(&'a str) -> ParseResult<&'a str> {
+) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
   substring(skip_while(cond))
 }
 
 /// Maps a success to `Some(T)` and a backtrace to `None`.
 pub fn maybe<'a, O>(
-  combinator: impl Fn(&'a str) -> ParseResult<O>,
-) -> impl Fn(&'a str) -> ParseResult<Option<O>> {
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+) -> impl Fn(&'a str) -> ParseResult<'a, Option<O>> {
   move |input| match combinator(input) {
     Ok((input, value)) => Ok((input, Some(value))),
     Err(ParseError::Backtrace) => Ok((input, None)),
@@ -128,9 +129,9 @@ pub fn maybe<'a, O>(
 
 /// Maps the success of a combinator by a function.
 pub fn map<'a, O, R>(
-  combinator: impl Fn(&'a str) -> ParseResult<O>,
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
   func: impl Fn(O) -> R,
-) -> impl Fn(&'a str) -> ParseResult<R> {
+) -> impl Fn(&'a str) -> ParseResult<'a, R> {
   move |input| {
     let (input, result) = combinator(input)?;
     Ok((input, func(result)))
@@ -139,8 +140,8 @@ pub fn map<'a, O, R>(
 
 /// Maps the result of a combinator by a function.
 pub fn map_res<'a, O, R>(
-  combinator: impl Fn(&'a str) -> ParseResult<O>,
-  func: impl Fn(ParseResult<O>) -> R,
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+  func: impl Fn(ParseResult<'a, O>) -> R,
 ) -> impl Fn(&'a str) -> R {
   move |input| func(combinator(input))
 }
