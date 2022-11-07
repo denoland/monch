@@ -1,6 +1,6 @@
 [package]
 name = "monch"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["the Deno authors"]
 documentation = "https://docs.rs/monch"
 edition = "2021"
