@@ -30,15 +30,26 @@ impl<'a> ParseErrorFailure<'a> {
   }
 
   /// Opinionated helper to turn this failure into a result.
-  pub fn into_result<T>(&self) -> Result<T, String> {
-    Err(format!(
+  pub fn into_result<T>(&self) -> Result<T, ParseErrorFailureError> {
+    Err(ParseErrorFailureError(format!(
       "{}\n  {}\n  ~",
       self.message,
       // truncate the output to prevent wrapping in the console
       self.input.chars().take(60).collect::<String>()
-    ))
+    )))
   }
 }
+
+#[derive(Debug)]
+pub struct ParseErrorFailureError(String);
+
+impl std::fmt::Display for ParseErrorFailureError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.0)
+  }
+}
+
+impl std::error::Error for ParseErrorFailureError {}
 
 impl<'a> ParseError<'a> {
   pub fn fail<O>(
@@ -58,7 +69,7 @@ pub type ParseResult<'a, O> = Result<(&'a str, O), ParseError<'a>>;
 /// Opinionated helper that converts a combinator into a Result<T, String>
 pub fn with_failure_handling<'a, T>(
   combinator: impl Fn(&'a str) -> ParseResult<T>,
-) -> impl Fn(&'a str) -> Result<T, String> {
+) -> impl Fn(&'a str) -> Result<T, ParseErrorFailureError> {
   move |input| match combinator(input) {
     Ok((input, result)) => {
       if !input.is_empty() {
