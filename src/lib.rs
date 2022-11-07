@@ -23,6 +23,21 @@ impl<'a> ParseErrorFailure<'a> {
       message: message.as_ref().to_owned(),
     }
   }
+
+  /// Opinionated helper used to fail for trailing input.
+  pub fn new_for_trailing_input(input: &'a str) -> Self {
+    ParseErrorFailure::new(input, "Unexpected character.")
+  }
+
+  /// Opinionated helper to turn this failure into a result.
+  pub fn into_result<T>(&self) -> Result<T, String> {
+    Err(format!(
+      "{}\n  {}\n  ~",
+      self.message,
+      // truncate the output to prevent wrapping in the console
+      self.input.chars().take(60).collect::<String>()
+    ))
+  }
 }
 
 impl<'a> ParseError<'a> {
@@ -39,6 +54,25 @@ impl<'a> ParseError<'a> {
 }
 
 pub type ParseResult<'a, O> = Result<(&'a str, O), ParseError<'a>>;
+
+/// Opinionated helper that converts a combinator into a Result<T, String>
+pub fn with_failure_handling<'a, T>(
+  combinator: impl Fn(&'a str) -> ParseResult<T>,
+) -> impl Fn(&'a str) -> Result<T, String> {
+  move |input| match combinator(input) {
+    Ok((input, result)) => {
+      if !input.is_empty() {
+        ParseErrorFailure::new_for_trailing_input(input).into_result()
+      } else {
+        Ok(result)
+      }
+    }
+    Err(ParseError::Backtrace) => {
+      ParseErrorFailure::new_for_trailing_input(input).into_result()
+    }
+    Err(ParseError::Failure(e)) => e.into_result(),
+  }
+}
 
 /// Recognizes a character.
 pub fn ch<'a>(c: char) -> impl Fn(&'a str) -> ParseResult<'a, char> {
