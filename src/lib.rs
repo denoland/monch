@@ -40,7 +40,7 @@ impl<'a> ParseErrorFailure<'a> {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseErrorFailureError(String);
 
 impl std::fmt::Display for ParseErrorFailureError {
