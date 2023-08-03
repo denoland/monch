@@ -31,12 +31,17 @@ impl<'a> ParseErrorFailure<'a> {
 
   /// Opinionated helper to turn this failure into a result.
   pub fn into_result<T>(&self) -> Result<T, ParseErrorFailureError> {
-    Err(ParseErrorFailureError(format!(
+    Err(self.into_error())
+  }
+
+  /// Opinionated helper to turn this failure into a `ParseErrorFailureError`.
+  pub fn into_error(&self) -> ParseErrorFailureError {
+    ParseErrorFailureError(format!(
       "{}\n  {}\n  ~",
       self.message,
       // truncate the output to prevent wrapping in the console
       self.input.chars().take(60).collect::<String>()
-    )))
+    ))
   }
 }
 
