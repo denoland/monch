@@ -150,8 +150,30 @@ pub fn substring<'a, O>(
   }
 }
 
-/// Skip the input while the condition is true.
+/// Skip the input while the condition is true about the next string.
 pub fn skip_while<'a>(
+  cond: impl Fn(&'a str) -> bool,
+) -> impl Fn(&'a str) -> ParseResult<'a, ()> {
+  move |input| {
+    for (pos, _) in input.char_indices() {
+      if !cond(&input[pos..]) {
+        return Ok((&input[pos..], ()));
+      }
+    }
+    // reached the end
+    Ok(("", ()))
+  }
+}
+
+/// Takes a substring while the condition is true about the next string.
+pub fn take_while<'a>(
+  cond: impl Fn(&'a str) -> bool,
+) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
+  substring(skip_while(cond))
+}
+
+/// Skip the input character while the char condition is true.
+pub fn skip_while_char<'a>(
   cond: impl Fn(char) -> bool,
 ) -> impl Fn(&'a str) -> ParseResult<'a, ()> {
   move |input| {
@@ -165,11 +187,11 @@ pub fn skip_while<'a>(
   }
 }
 
-/// Takes a substring while the condition is true.
-pub fn take_while<'a>(
+/// Takes a substring while the char condition is true.
+pub fn take_while_char<'a>(
   cond: impl Fn(char) -> bool,
 ) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
-  substring(skip_while(cond))
+  substring(skip_while_char(cond))
 }
 
 /// Maps a success to `Some(T)` and a backtrace to `None`.
