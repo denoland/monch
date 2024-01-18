@@ -1,4 +1,4 @@
-// Copyright 2018-2022 the Deno authors. All rights reserved. MIT license.
+// Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
 
 /// An error that occurred while parsing.
 #[derive(Debug)]
@@ -10,7 +10,7 @@ pub enum ParseError<'a> {
 
 /// A complete parsing failure along with the location
 /// the error occurred and the error message.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParseErrorFailure<'a> {
   pub input: &'a str,
   pub message: String,
@@ -30,33 +30,42 @@ impl<'a> ParseErrorFailure<'a> {
   }
 
   /// Opinionated helper to turn this failure into a result.
-  pub fn into_result<T>(&self) -> Result<T, ParseErrorFailureError> {
+  pub fn into_result<T>(self) -> Result<T, ParseErrorFailureError> {
     Err(self.into_error())
   }
 
   /// Opinionated helper to turn this failure into a `ParseErrorFailureError`.
-  pub fn into_error(&self) -> ParseErrorFailureError {
-    ParseErrorFailureError(format!(
-      "{}\n  {}\n  ~",
-      self.message,
+  pub fn into_error(self) -> ParseErrorFailureError {
+    ParseErrorFailureError {
+      message: self.message,
       // truncate the output to prevent wrapping in the console
-      self.input.chars().take(60).collect::<String>()
-    ))
+      code_snippet: Some(self.input.chars().take(60).collect::<String>()),
+    }
   }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ParseErrorFailureError(String);
+pub struct ParseErrorFailureError {
+  pub message: String,
+  pub code_snippet: Option<String>,
+}
 
 impl ParseErrorFailureError {
   pub fn new(message: String) -> Self {
-    ParseErrorFailureError(message)
+    ParseErrorFailureError {
+      message,
+      code_snippet: None,
+    }
   }
 }
 
 impl std::fmt::Display for ParseErrorFailureError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", self.0)
+    if let Some(code_snippet) = &self.code_snippet {
+      write!(f, "{}\n  {}\n  ~", self.message, code_snippet)
+    } else {
+      write!(f, "{}", self.message)
+    }
   }
 }
 
@@ -550,5 +559,19 @@ fn is_backtrace<O>(result: ParseResult<O>) -> Result<bool, ParseError> {
     Ok(_) => Ok(false),
     Err(ParseError::Backtrace) => Ok(true),
     Err(err) => Err(err),
+  }
+}
+
+#[cfg(test)]
+mod test {
+  use super::*;
+
+  #[test]
+  fn error_with_code_formatting() {
+    let error = ParseErrorFailureError {
+      message: "Message.".to_string(),
+      code_snippet: Some("code".to_string()),
+    };
+    assert_eq!(error.to_string(), "Message.\n  code\n  ~");
   }
 }

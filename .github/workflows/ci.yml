@@ -35,12 +35,12 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Lint
-        run: cargo clippy --all-targets --all-features --release
+        run: cargo clippy --all-targets --all-features
 
       - name: Build
-        run: cargo build --all-targets --all-features --release
+        run: cargo build --all-targets --all-features
       - name: Test
-        run: cargo test --all-targets --all-features --release
+        run: cargo test --all-targets --all-features
 
       - name: Publish
         if: |
