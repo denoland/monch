@@ -458,7 +458,7 @@ pub fn many1<'a, O>(
 }
 
 /// Skips the whitespace.
-pub fn skip_whitespace(input: &str) -> ParseResult<()> {
+pub fn skip_whitespace(input: &str) -> ParseResult<'_, ()> {
   match whitespace(input) {
     Ok((input, _)) => Ok((input, ())),
     // the next char was not a backtrace... continue.
@@ -468,7 +468,7 @@ pub fn skip_whitespace(input: &str) -> ParseResult<()> {
 }
 
 /// Parses and expects whitespace.
-pub fn whitespace(input: &str) -> ParseResult<&str> {
+pub fn whitespace(input: &str) -> ParseResult<'_, &str> {
   if input.is_empty() {
     return ParseError::backtrace();
   }
@@ -510,7 +510,7 @@ impl IsEmptyable for String {
   }
 }
 
-impl<'a> IsEmptyable for &'a str {
+impl IsEmptyable for &str {
   fn is_empty(&self) -> bool {
     (*self).is_empty()
   }
