@@ -8,3 +8,18 @@ homepage = "https://deno.land/"
 license = "MIT"
 repository = "https://github.com/denoland/monch"
 description = "Inspired by nom, but specifically for strings."
+
+[dev-dependencies]
+divan = "0.1"
+
+[[bench]]
+name = "one_of"
+harness = false
+
+[[bench]]
+name = "many0"
+harness = false
+
+[[bench]]
+name = "ch"
+harness = false

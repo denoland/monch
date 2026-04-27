@@ -5,7 +5,7 @@
 pub enum ParseError<'a> {
   Backtrace,
   /// Parsing should completely fail.
-  Failure(ParseErrorFailure<'a>),
+  Failure(Box<ParseErrorFailure<'a>>),
 }
 
 /// A complete parsing failure along with the location
@@ -17,10 +17,10 @@ pub struct ParseErrorFailure<'a> {
 }
 
 impl<'a> ParseErrorFailure<'a> {
-  pub fn new(input: &'a str, message: impl AsRef<str>) -> Self {
+  pub fn new(input: &'a str, message: impl Into<String>) -> Self {
     ParseErrorFailure {
       input,
-      message: message.as_ref().to_owned(),
+      message: message.into(),
     }
   }
 
@@ -36,10 +36,16 @@ impl<'a> ParseErrorFailure<'a> {
 
   /// Opinionated helper to turn this failure into a `ParseErrorFailureError`.
   pub fn into_error(self) -> ParseErrorFailureError {
+    // truncate the output to prevent wrapping in the console. find the byte
+    // boundary at the 60th char so the snippet can be sliced and allocated
+    // in a single `to_owned` rather than char-by-char into a String.
+    let snippet = match self.input.char_indices().nth(60) {
+      Some((idx, _)) => self.input[..idx].to_owned(),
+      None => self.input.to_owned(),
+    };
     ParseErrorFailureError {
       message: self.message,
-      // truncate the output to prevent wrapping in the console
-      code_snippet: Some(self.input.chars().take(60).collect::<String>()),
+      code_snippet: Some(snippet),
     }
   }
 }
@@ -74,9 +80,11 @@ impl std::error::Error for ParseErrorFailureError {}
 impl<'a> ParseError<'a> {
   pub fn fail<O>(
     input: &'a str,
-    message: impl AsRef<str>,
+    message: impl Into<String>,
   ) -> ParseResult<'a, O> {
-    Err(ParseError::Failure(ParseErrorFailure::new(input, message)))
+    Err(ParseError::Failure(Box::new(ParseErrorFailure::new(
+      input, message,
+    ))))
   }
 
   pub fn backtrace<O>() -> ParseResult<'a, O> {
@@ -101,13 +109,17 @@ pub fn with_failure_handling<'a, T>(
     Err(ParseError::Backtrace) => {
       ParseErrorFailure::new_for_trailing_input(input).into_result()
     }
-    Err(ParseError::Failure(e)) => e.into_result(),
+    Err(ParseError::Failure(e)) => (*e).into_result(),
   }
 }
 
 /// Recognizes a character.
 pub fn ch<'a>(c: char) -> impl Fn(&'a str) -> ParseResult<'a, char> {
-  if_true(next_char, move |found_char| *found_char == c)
+  let len = c.len_utf8();
+  move |input| match input.chars().next() {
+    Some(found) if found == c => Ok((&input[len..], c)),
+    _ => ParseError::backtrace(),
+  }
 }
 
 /// Gets the next character.
@@ -123,9 +135,25 @@ pub fn next_char<'a>(input: &'a str) -> ParseResult<'a, char> {
 pub fn one_of<'a>(
   value: &'static str,
 ) -> impl Fn(&'a str) -> ParseResult<'a, char> {
+  // precompute an ASCII bitmap so the per-char check is O(1) instead of
+  // a substring search on every call. non-ASCII chars fall back to a Vec.
+  let mut ascii_bitmap: u128 = 0;
+  let mut non_ascii: Vec<char> = Vec::new();
+  for c in value.chars() {
+    if c.is_ascii() {
+      ascii_bitmap |= 1u128 << (c as u8);
+    } else {
+      non_ascii.push(c);
+    }
+  }
   move |input| {
     let (input, c) = next_char(input)?;
-    if value.contains(c) {
+    let matched = if c.is_ascii() {
+      (ascii_bitmap >> (c as u8)) & 1 != 0
+    } else {
+      non_ascii.contains(&c)
+    };
+    if matched {
       Ok((input, c))
     } else {
       ParseError::backtrace()
@@ -134,16 +162,27 @@ pub fn one_of<'a>(
 }
 
 /// Recognizes a string.
+///
+/// Use [`tag_owned`] when the value is built at runtime.
 pub fn tag<'a>(
-  value: impl AsRef<str>,
+  value: &'static str,
 ) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
-  let value = value.as_ref().to_string();
-  move |input| {
-    if input.starts_with(&value) {
-      Ok((&input[value.len()..], &input[..value.len()]))
-    } else {
-      Err(ParseError::Backtrace)
-    }
+  move |input| match input.strip_prefix(value) {
+    Some(rest) => Ok((rest, &input[..value.len()])),
+    None => Err(ParseError::Backtrace),
+  }
+}
+
+/// Recognizes a runtime-built string.
+///
+/// Prefer [`tag`] when the value is a `&'static str`; this version owns its
+/// tag, which is needed only when the string is computed at runtime.
+pub fn tag_owned<'a>(
+  value: String,
+) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
+  move |input| match input.strip_prefix(value.as_str()) {
+    Some(rest) => Ok((rest, &input[..value.len()])),
+    None => Err(ParseError::Backtrace),
   }
 }
 
@@ -340,12 +379,16 @@ pub fn assert<'a, O>(
     if condition(result.as_ref()) {
       result
     } else {
-      match combinator(input) {
+      match result {
         Err(ParseError::Failure(err)) => {
-          let mut message = message.to_string();
-          message.push_str("\n\n");
-          message.push_str(&err.message);
-          ParseError::fail(err.input, message)
+          let capacity = message.len() + 2 + err.message.len();
+          let mut new_message =
+            String::with_capacity(capacity);
+          new_message.push_str(message);
+          new_message.push_str("\n\n");
+          new_message.push_str(&err.message);
+          debug_assert_eq!(capacity, new_message.len());
+          ParseError::fail(err.input, new_message)
         }
         _ => ParseError::fail(input, message),
       }
@@ -380,10 +423,12 @@ pub fn with_error_context<'a, O>(
     Ok(result) => Ok(result),
     Err(ParseError::Backtrace) => Err(ParseError::Backtrace),
     Err(ParseError::Failure(err)) => {
-      let mut message = message.to_string();
-      message.push_str("\n\n");
-      message.push_str(&err.message);
-      ParseError::fail(err.input, message)
+      let mut new_message =
+        String::with_capacity(message.len() + 2 + err.message.len());
+      new_message.push_str(message);
+      new_message.push_str("\n\n");
+      new_message.push_str(&err.message);
+      ParseError::fail(err.input, new_message)
     }
   }
 }
