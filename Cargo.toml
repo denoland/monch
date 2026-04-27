@@ -13,13 +13,5 @@ description = "Inspired by nom, but specifically for strings."
 divan = "0.1"
 
 [[bench]]
-name = "one_of"
-harness = false
-
-[[bench]]
-name = "many0"
-harness = false
-
-[[bench]]
-name = "ch"
+name = "combinators"
 harness = false
