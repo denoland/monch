@@ -382,8 +382,7 @@ pub fn assert<'a, O>(
       match result {
         Err(ParseError::Failure(err)) => {
           let capacity = message.len() + 2 + err.message.len();
-          let mut new_message =
-            String::with_capacity(capacity);
+          let mut new_message = String::with_capacity(capacity);
           new_message.push_str(message);
           new_message.push_str("\n\n");
           new_message.push_str(&err.message);

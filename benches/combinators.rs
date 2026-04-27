@@ -50,8 +50,7 @@ mod one_of {
   use monch::one_of;
 
   const DIGITS: &str = "0123456789";
-  const IDENT: &str =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+  const IDENT: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
   const OPS: &str = "+-*/%<>=!&|^~";
 
   #[divan::bench]
