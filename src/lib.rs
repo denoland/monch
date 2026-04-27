@@ -1046,7 +1046,8 @@ mod test {
 
   #[test]
   fn separated_list_collects_with_separator() {
-    let parser = separated_list(take_while(|c| c.is_ascii_alphabetic()), ch(','));
+    let parser =
+      separated_list(take_while(|c| c.is_ascii_alphabetic()), ch(','));
     let (rest, results) = parser("a,bb,ccc!").unwrap();
     assert_eq!(rest, "!");
     assert_eq!(results, vec!["a", "bb", "ccc"]);
