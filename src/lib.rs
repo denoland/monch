@@ -19,6 +19,7 @@ pub struct ParseErrorFailure<'a> {
 }
 
 impl<'a> ParseErrorFailure<'a> {
+  #[inline]
   pub fn new(input: &'a str, message: impl Into<Cow<'static, str>>) -> Self {
     ParseErrorFailure {
       input,
@@ -27,6 +28,7 @@ impl<'a> ParseErrorFailure<'a> {
   }
 
   /// Opinionated helper used to fail for trailing input.
+  #[inline]
   pub fn new_for_trailing_input(input: &'a str) -> Self {
     ParseErrorFailure::new(input, "Unexpected character.")
   }
@@ -80,6 +82,7 @@ impl std::fmt::Display for ParseErrorFailureError {
 impl std::error::Error for ParseErrorFailureError {}
 
 impl<'a> ParseError<'a> {
+  #[inline]
   pub fn fail<O>(
     input: &'a str,
     message: impl Into<Cow<'static, str>>,
@@ -89,6 +92,7 @@ impl<'a> ParseError<'a> {
     ))))
   }
 
+  #[inline]
   pub fn backtrace<O>() -> ParseResult<'a, O> {
     Err(ParseError::Backtrace)
   }
@@ -116,15 +120,30 @@ pub fn with_failure_handling<'a, T>(
 }
 
 /// Recognizes a character.
+#[inline]
 pub fn ch<'a>(c: char) -> impl Fn(&'a str) -> ParseResult<'a, char> {
+  // ASCII fast path: branch is on a value captured by the closure, so once
+  // `ch` is inlined at the call site the branch folds away.
+  let is_ascii = c.is_ascii();
   let len = c.len_utf8();
-  move |input| match input.chars().next() {
-    Some(found) if found == c => Ok((&input[len..], c)),
-    _ => ParseError::backtrace(),
+  let ascii_byte = c as u32 as u8;
+  move |input: &'a str| {
+    if is_ascii {
+      match input.as_bytes().first() {
+        Some(&b) if b == ascii_byte => Ok((&input[1..], c)),
+        _ => ParseError::backtrace(),
+      }
+    } else {
+      match input.chars().next() {
+        Some(found) if found == c => Ok((&input[len..], c)),
+        _ => ParseError::backtrace(),
+      }
+    }
   }
 }
 
 /// Gets the next character.
+#[inline]
 #[allow(clippy::needless_lifetimes)]
 pub fn next_char<'a>(input: &'a str) -> ParseResult<'a, char> {
   match input.chars().next() {
@@ -134,6 +153,7 @@ pub fn next_char<'a>(input: &'a str) -> ParseResult<'a, char> {
 }
 
 /// Recognizes any character in the provided string.
+#[inline]
 pub fn one_of<'a>(
   value: &'static str,
 ) -> impl Fn(&'a str) -> ParseResult<'a, char> {
@@ -166,6 +186,7 @@ pub fn one_of<'a>(
 /// Recognizes a string.
 ///
 /// Use [`tag_owned`] when the value is built at runtime.
+#[inline]
 pub fn tag<'a>(
   value: &'static str,
 ) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
@@ -179,6 +200,7 @@ pub fn tag<'a>(
 ///
 /// Prefer [`tag`] when the value is a `&'static str`; this version owns its
 /// tag, which is needed only when the string is computed at runtime.
+#[inline]
 pub fn tag_owned<'a>(
   value: String,
 ) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
@@ -189,6 +211,7 @@ pub fn tag_owned<'a>(
 }
 
 /// Gets the substring found for the duration of the combinator.
+#[inline]
 pub fn substring<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
@@ -201,6 +224,7 @@ pub fn substring<'a, O>(
 }
 
 /// Skip the input while the condition is true.
+#[inline]
 pub fn skip_while<'a>(
   cond: impl Fn(char) -> bool,
 ) -> impl Fn(&'a str) -> ParseResult<'a, ()> {
@@ -215,14 +239,52 @@ pub fn skip_while<'a>(
   }
 }
 
+/// Skip the input while the condition is true on each byte. Faster than
+/// [`skip_while`] when the predicate is ASCII-only — a byte loop avoids
+/// UTF-8 decoding. The predicate must return `false` for any non-ASCII
+/// continuation byte for input slicing to land on a char boundary; in
+/// practice this is satisfied automatically by ASCII-classifier predicates
+/// like `is_ascii_digit` / `is_ascii_alphanumeric` / `== b' '`.
+#[inline]
+pub fn skip_while_byte<'a>(
+  cond: impl Fn(u8) -> bool,
+) -> impl Fn(&'a str) -> ParseResult<'a, ()> {
+  move |input| {
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && cond(bytes[i]) {
+      i += 1;
+    }
+    Ok((&input[i..], ()))
+  }
+}
+
 /// Takes a substring while the condition is true.
+#[inline]
 pub fn take_while<'a>(
   cond: impl Fn(char) -> bool,
 ) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
   substring(skip_while(cond))
 }
 
+/// Byte-based variant of [`take_while`]; see [`skip_while_byte`] for the
+/// constraint on `cond`.
+#[inline]
+pub fn take_while_byte<'a>(
+  cond: impl Fn(u8) -> bool,
+) -> impl Fn(&'a str) -> ParseResult<'a, &'a str> {
+  move |input| {
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && cond(bytes[i]) {
+      i += 1;
+    }
+    Ok((&input[i..], &input[..i]))
+  }
+}
+
 /// Maps a success to `Some(T)` and a backtrace to `None`.
+#[inline]
 pub fn maybe<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Option<O>> {
@@ -234,6 +296,7 @@ pub fn maybe<'a, O>(
 }
 
 /// Maps the success of a combinator by a function.
+#[inline]
 pub fn map<'a, O, R>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
   func: impl Fn(O) -> R,
@@ -245,6 +308,7 @@ pub fn map<'a, O, R>(
 }
 
 /// Maps the result of a combinator by a function.
+#[inline]
 pub fn map_res<'a, O, R>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
   func: impl Fn(ParseResult<'a, O>) -> R,
@@ -253,6 +317,7 @@ pub fn map_res<'a, O, R>(
 }
 
 /// Checks for either to match.
+#[inline]
 pub fn or<'a, O>(
   a: impl Fn(&'a str) -> ParseResult<'a, O>,
   b: impl Fn(&'a str) -> ParseResult<'a, O>,
@@ -265,6 +330,7 @@ pub fn or<'a, O>(
 }
 
 /// Checks for any to match.
+#[inline]
 pub fn or3<'a, O>(
   a: impl Fn(&'a str) -> ParseResult<'a, O>,
   b: impl Fn(&'a str) -> ParseResult<'a, O>,
@@ -274,6 +340,7 @@ pub fn or3<'a, O>(
 }
 
 /// Checks for any to match.
+#[inline]
 pub fn or4<'a, O>(
   a: impl Fn(&'a str) -> ParseResult<'a, O>,
   b: impl Fn(&'a str) -> ParseResult<'a, O>,
@@ -284,6 +351,7 @@ pub fn or4<'a, O>(
 }
 
 /// Checks for any to match.
+#[inline]
 pub fn or5<'a, O>(
   a: impl Fn(&'a str) -> ParseResult<'a, O>,
   b: impl Fn(&'a str) -> ParseResult<'a, O>,
@@ -295,6 +363,7 @@ pub fn or5<'a, O>(
 }
 
 /// Checks for any to match.
+#[inline]
 pub fn or6<'a, O>(
   a: impl Fn(&'a str) -> ParseResult<'a, O>,
   b: impl Fn(&'a str) -> ParseResult<'a, O>,
@@ -307,6 +376,7 @@ pub fn or6<'a, O>(
 }
 
 /// Checks for any to match.
+#[inline]
 pub fn or7<'a, O>(
   a: impl Fn(&'a str) -> ParseResult<'a, O>,
   b: impl Fn(&'a str) -> ParseResult<'a, O>,
@@ -320,6 +390,7 @@ pub fn or7<'a, O>(
 }
 
 /// Returns the second value and discards the first.
+#[inline]
 pub fn preceded<'a, First, Second>(
   first: impl Fn(&'a str) -> ParseResult<'a, First>,
   second: impl Fn(&'a str) -> ParseResult<'a, Second>,
@@ -328,6 +399,7 @@ pub fn preceded<'a, First, Second>(
 }
 
 /// Returns the first value and discards the second.
+#[inline]
 pub fn terminated<'a, First, Second>(
   first: impl Fn(&'a str) -> ParseResult<'a, First>,
   second: impl Fn(&'a str) -> ParseResult<'a, Second>,
@@ -336,6 +408,7 @@ pub fn terminated<'a, First, Second>(
 }
 
 /// Gets a second value that is delimited by a first and third.
+#[inline]
 pub fn delimited<'a, First, Second, Third>(
   first: impl Fn(&'a str) -> ParseResult<'a, First>,
   second: impl Fn(&'a str) -> ParseResult<'a, Second>,
@@ -350,6 +423,7 @@ pub fn delimited<'a, First, Second, Third>(
 }
 
 /// Returns both results of the two combinators.
+#[inline]
 pub fn pair<'a, First, Second>(
   first: impl Fn(&'a str) -> ParseResult<'a, First>,
   second: impl Fn(&'a str) -> ParseResult<'a, Second>,
@@ -424,11 +498,12 @@ pub fn with_error_context<'a, O>(
     Ok(result) => Ok(result),
     Err(ParseError::Backtrace) => Err(ParseError::Backtrace),
     Err(ParseError::Failure(err)) => {
-      let mut new_message =
-        String::with_capacity(message.len() + 2 + err.message.len());
+      let capacity = message.len() + 2 + err.message.len();
+      let mut new_message = String::with_capacity(capacity);
       new_message.push_str(message);
       new_message.push_str("\n\n");
       new_message.push_str(&err.message);
+      debug_assert_eq!(new_message.len(), capacity);
       ParseError::fail(err.input, Cow::Owned(new_message))
     }
   }
@@ -436,12 +511,19 @@ pub fn with_error_context<'a, O>(
 
 /// Keeps consuming a combinator into an array until a condition
 /// is met or backtracing occurs.
+///
+/// If you don't actually need the collected `Vec`, prefer
+/// [`many_till_fold`] / [`many0_count`] to skip the allocation.
+#[inline]
 pub fn many_till<'a, O, OCondition>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
   condition: impl Fn(&'a str) -> ParseResult<'a, OCondition>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
   move |mut input| {
-    let mut results = Vec::new();
+    // Most uses of many_till in real grammars produce 1-4 elements; reserving
+    // up front avoids the 0->4 reallocation churn at the cost of one small
+    // alloc when the parse matches nothing (rare on hot paths).
+    let mut results: Vec<O> = Vec::with_capacity(4);
     while !input.is_empty() && is_backtrace(condition(input))? {
       match combinator(input) {
         Ok((result_input, value)) => {
@@ -460,12 +542,16 @@ pub fn many_till<'a, O, OCondition>(
 
 /// Keeps consuming a combinator into an array until a condition
 /// is met or backtracing occurs.
+///
+/// If you don't need the collected `Vec`, prefer [`separated_fold`] /
+/// [`separated_count`] to skip the allocation.
+#[inline]
 pub fn separated_list<'a, O, OSeparator>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
   separator: impl Fn(&'a str) -> ParseResult<'a, OSeparator>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
   move |mut input| {
-    let mut results = Vec::new();
+    let mut results: Vec<O> = Vec::with_capacity(4);
     while !input.is_empty() {
       match combinator(input) {
         Ok((result_input, value)) => {
@@ -487,8 +573,93 @@ pub fn separated_list<'a, O, OSeparator>(
   }
 }
 
+/// Like [`many_till`] but folds each parsed item into an accumulator
+/// instead of allocating a `Vec`. Use this when you only need a derived
+/// value (e.g. a count, a sum, or a custom collection).
+#[inline]
+pub fn many_till_fold<'a, O, OCondition, Acc>(
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+  condition: impl Fn(&'a str) -> ParseResult<'a, OCondition>,
+  init: Acc,
+  fold: impl Fn(Acc, O) -> Acc,
+) -> impl FnOnce(&'a str) -> ParseResult<'a, Acc> {
+  move |mut input| {
+    let mut acc = init;
+    while !input.is_empty() && is_backtrace(condition(input))? {
+      match combinator(input) {
+        Ok((result_input, value)) => {
+          acc = fold(acc, value);
+          input = result_input;
+        }
+        Err(ParseError::Backtrace) => return Ok((input, acc)),
+        Err(err) => return Err(err),
+      }
+    }
+    Ok((input, acc))
+  }
+}
+
+/// Like [`separated_list`] but folds each parsed item into an accumulator
+/// instead of allocating a `Vec`.
+#[inline]
+pub fn separated_fold<'a, O, OSeparator, Acc>(
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+  separator: impl Fn(&'a str) -> ParseResult<'a, OSeparator>,
+  init: Acc,
+  fold: impl Fn(Acc, O) -> Acc,
+) -> impl FnOnce(&'a str) -> ParseResult<'a, Acc> {
+  move |mut input| {
+    let mut acc = init;
+    while !input.is_empty() {
+      match combinator(input) {
+        Ok((result_input, value)) => {
+          acc = fold(acc, value);
+          input = result_input;
+        }
+        Err(ParseError::Backtrace) => return Ok((input, acc)),
+        Err(err) => return Err(err),
+      }
+      input = match separator(input) {
+        Ok((input, _)) => input,
+        Err(ParseError::Backtrace) => break,
+        Err(err) => return Err(err),
+      };
+    }
+    Ok((input, acc))
+  }
+}
+
+/// Counts how many times the combinator matches before a backtrace.
+/// Equivalent to `many0(...).len()` but does not allocate.
+#[inline]
+pub fn many0_count<'a, O>(
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+) -> impl Fn(&'a str) -> ParseResult<'a, usize> {
+  move |input| {
+    many_till_fold(
+      &combinator,
+      |_| ParseError::backtrace::<()>(),
+      0usize,
+      |acc, _| acc + 1,
+    )(input)
+  }
+}
+
+/// Counts how many separated items the combinator matches.
+/// Equivalent to `separated_list(...).len()` but does not allocate.
+#[inline]
+pub fn separated_count<'a, O, OSeparator>(
+  combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
+  separator: impl Fn(&'a str) -> ParseResult<'a, OSeparator>,
+) -> impl Fn(&'a str) -> ParseResult<'a, usize> {
+  move |input| {
+    separated_fold(&combinator, &separator, 0usize, |acc, _| acc + 1)(input)
+  }
+}
+
 /// Applies the combinator 0 or more times and returns a vector
 /// of all the parsed results.
+#[inline]
 pub fn many0<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
@@ -497,6 +668,7 @@ pub fn many0<'a, O>(
 
 /// Applies the combinator at least 1 time, but maybe more
 /// and returns a vector of all the parsed results.
+#[inline]
 pub fn many1<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
@@ -504,34 +676,77 @@ pub fn many1<'a, O>(
 }
 
 /// Skips the whitespace.
+#[inline]
 pub fn skip_whitespace(input: &str) -> ParseResult<'_, ()> {
-  match whitespace(input) {
-    Ok((input, _)) => Ok((input, ())),
-    // the next char was not a backtrace... continue.
-    Err(ParseError::Backtrace) => Ok((input, ())),
-    Err(err) => Err(err),
+  // ASCII fast path: whitespace in semver-like grammars is overwhelmingly
+  // ASCII space or tab. Walk bytes directly until we hit non-whitespace or
+  // a non-ASCII byte (rare — fall back to the char-aware loop for that).
+  let bytes = input.as_bytes();
+  let mut i = 0;
+  while i < bytes.len() {
+    let b = bytes[i];
+    if b < 0x80 {
+      if matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) {
+        i += 1;
+      } else {
+        return Ok((&input[i..], ()));
+      }
+    } else {
+      return match whitespace(&input[i..]) {
+        Ok((rest, _)) => Ok((rest, ())),
+        Err(ParseError::Backtrace) => Ok((&input[i..], ())),
+        Err(err) => Err(err),
+      };
+    }
   }
+  Ok((&input[i..], ()))
 }
 
 /// Parses and expects whitespace.
+#[inline]
 pub fn whitespace(input: &str) -> ParseResult<'_, &str> {
   if input.is_empty() {
     return ParseError::backtrace();
   }
 
-  for (pos, c) in input.char_indices() {
+  // ASCII fast path mirroring `skip_whitespace`. Falls through to the
+  // char-aware loop only when the first byte is non-ASCII.
+  let bytes = input.as_bytes();
+  let mut i = 0;
+  while i < bytes.len() {
+    let b = bytes[i];
+    if b < 0x80 {
+      if matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) {
+        i += 1;
+        continue;
+      }
+      if i == 0 {
+        return ParseError::backtrace();
+      }
+      return Ok((&input[i..], &input[..i]));
+    }
+    // non-ASCII byte: hand off to char-aware scan from this position
+    return whitespace_char_path(input, i);
+  }
+  Ok(("", input))
+}
+
+#[inline(never)]
+fn whitespace_char_path(input: &str, start: usize) -> ParseResult<'_, &str> {
+  for (rel_pos, c) in input[start..].char_indices() {
     if !c.is_whitespace() {
+      let pos = start + rel_pos;
       if pos == 0 {
         return ParseError::backtrace();
       }
       return Ok((&input[pos..], &input[..pos]));
     }
   }
-
   Ok(("", input))
 }
 
 /// Checks if a condition is true for a combinator.
+#[inline]
 pub fn if_true<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
   condition: impl Fn(&O) -> bool,
@@ -569,6 +784,7 @@ impl<T> IsEmptyable for Vec<T> {
 }
 
 /// Checks if the combinator result is not empty.
+#[inline]
 pub fn if_not_empty<'a, R: IsEmptyable>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, R>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, R> {
@@ -576,6 +792,7 @@ pub fn if_not_empty<'a, R: IsEmptyable>(
 }
 
 /// Checks if a combinator is false without consuming the input.
+#[inline]
 pub fn check_not<'a, O>(
   combinator: impl Fn(&'a str) -> ParseResult<'a, O>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, ()> {
@@ -600,6 +817,7 @@ pub fn log_result<'a, O: std::fmt::Debug>(
   }
 }
 
+#[inline]
 fn is_backtrace<O>(result: ParseResult<O>) -> Result<bool, ParseError> {
   match result {
     Ok(_) => Ok(false),
@@ -1204,6 +1422,110 @@ mod test {
     let parser = with_failure_handling(tag("hello"));
     let err = parser("nope").unwrap_err();
     assert_eq!(err.message, "Unexpected character.");
+  }
+
+  #[test]
+  fn skip_while_byte_skips_matching_bytes() {
+    let parser = skip_while_byte(|b| b.is_ascii_digit());
+    assert_eq!(parser("123abc").unwrap(), ("abc", ()));
+  }
+
+  #[test]
+  fn skip_while_byte_consumes_entire_input() {
+    let parser = skip_while_byte(|b| b.is_ascii_digit());
+    assert_eq!(parser("12345").unwrap(), ("", ()));
+  }
+
+  #[test]
+  fn skip_while_byte_skips_nothing_when_none_match() {
+    let parser = skip_while_byte(|b| b.is_ascii_digit());
+    assert_eq!(parser("abc").unwrap(), ("abc", ()));
+  }
+
+  #[test]
+  fn take_while_byte_returns_matched_prefix() {
+    let parser = take_while_byte(|b| b.is_ascii_alphabetic());
+    assert_eq!(parser("abc123").unwrap(), ("123", "abc"));
+  }
+
+  #[test]
+  fn take_while_byte_returns_empty_when_none_match() {
+    let parser = take_while_byte(|b| b.is_ascii_alphabetic());
+    assert_eq!(parser("123").unwrap(), ("123", ""));
+  }
+
+  #[test]
+  fn many_till_fold_sums_without_allocating() {
+    let parser = many_till_fold(
+      take_while(|c| c.is_ascii_digit()),
+      ch('!'),
+      0u32,
+      |acc, s: &str| acc + s.parse::<u32>().unwrap_or(0),
+    );
+    let (rest, sum) = parser("1!").unwrap();
+    assert_eq!(rest, "!");
+    assert_eq!(sum, 1);
+  }
+
+  #[test]
+  fn many0_count_counts_matches() {
+    let parser = many0_count(ch('a'));
+    let (rest, n) = parser("aaab").unwrap();
+    assert_eq!(rest, "b");
+    assert_eq!(n, 3);
+  }
+
+  #[test]
+  fn many0_count_returns_zero_when_no_match() {
+    let parser = many0_count(ch('a'));
+    let (rest, n) = parser("xxx").unwrap();
+    assert_eq!(rest, "xxx");
+    assert_eq!(n, 0);
+  }
+
+  #[test]
+  fn separated_fold_collects_into_string() {
+    let parser = separated_fold(
+      take_while(|c| c.is_ascii_alphabetic()),
+      ch(','),
+      String::new(),
+      |mut acc, s: &str| {
+        if !acc.is_empty() {
+          acc.push('|');
+        }
+        acc.push_str(s);
+        acc
+      },
+    );
+    let (rest, joined) = parser("a,bb,ccc!").unwrap();
+    assert_eq!(rest, "!");
+    assert_eq!(joined, "a|bb|ccc");
+  }
+
+  #[test]
+  fn separated_count_counts_items() {
+    let parser =
+      separated_count(take_while(|c| c.is_ascii_alphabetic()), ch(','));
+    let (rest, n) = parser("a,bb,ccc!").unwrap();
+    assert_eq!(rest, "!");
+    assert_eq!(n, 3);
+  }
+
+  #[test]
+  fn skip_whitespace_handles_non_ascii_whitespace() {
+    // U+00A0 NO-BREAK SPACE is whitespace but non-ASCII; ensure the
+    // ASCII fast path correctly hands off to the char-aware fallback.
+    let input = "\u{00A0}hi";
+    assert_eq!(skip_whitespace(input).unwrap(), ("hi", ()));
+  }
+
+  #[test]
+  fn whitespace_handles_non_ascii_whitespace() {
+    // leading non-ASCII whitespace must still be consumed
+    let input = "\u{00A0}hi";
+    let (rest, ws) = whitespace(input).unwrap();
+    assert_eq!(rest, "hi");
+    assert_eq!(ws, "\u{00A0}");
   }
 
   #[test]
