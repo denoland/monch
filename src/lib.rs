@@ -520,10 +520,7 @@ pub fn many_till<'a, O, OCondition>(
   condition: impl Fn(&'a str) -> ParseResult<'a, OCondition>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
   move |mut input| {
-    // Most uses of many_till in real grammars produce 1-4 elements; reserving
-    // up front avoids the 0->4 reallocation churn at the cost of one small
-    // alloc when the parse matches nothing (rare on hot paths).
-    let mut results: Vec<O> = Vec::with_capacity(4);
+    let mut results: Vec<O> = Vec::new();
     while !input.is_empty() && is_backtrace(condition(input))? {
       match combinator(input) {
         Ok((result_input, value)) => {
@@ -551,7 +548,7 @@ pub fn separated_list<'a, O, OSeparator>(
   separator: impl Fn(&'a str) -> ParseResult<'a, OSeparator>,
 ) -> impl Fn(&'a str) -> ParseResult<'a, Vec<O>> {
   move |mut input| {
-    let mut results: Vec<O> = Vec::with_capacity(4);
+    let mut results: Vec<O> = Vec::new();
     while !input.is_empty() {
       match combinator(input) {
         Ok((result_input, value)) => {
