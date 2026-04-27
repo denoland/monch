@@ -6,4 +6,4 @@
 
 Inspired by [nom](https://crates.io/crates/nom), but specifically for strings and with some additional combinators we use in Deno.
 
-See an example of use in [deno_task_shell](https://github.com/denoland/deno_task_shell).
+See an example of use in [deno_task_shell](https://github.com/denoland/deno_task_shell) or [deno_semver](https://github.com/denoland/deno_semver).
